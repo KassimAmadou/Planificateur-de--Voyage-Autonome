@@ -1,95 +1,132 @@
 import streamlit as st
 import sys
 import os
+import requests
 from datetime import datetime
 
-# --- 1. CONFIGURATION DU CHEMIN ---
+# Configuration des chemins
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-# --- 2. IMPORTS DU PROJET ---
 from agents.travel_agent import TravelAgent
 from exports.pdf_export import generate_trip_pdf
+from core.tools import get_lat_lon # On réutilise votre fonction géo existante
 
-# --- 3. APPLICATION STREAMLIT ---
-def main():
-    st.set_page_config(page_title="Planificateur de Voyage AI", page_icon="✈️", layout="wide")
+# --- FONCTION D'AFFICHAGE MÉTÉO VISUELLE ---
+def afficher_widget_meteo(ville):
+    """Récupère et affiche la météo avec des métriques Streamlit jolies"""
+    lat, lon = get_lat_lon(ville)
+    if not lat:
+        return
 
-    st.title(" Planificateur de Voyage Autonome")
-    st.markdown("Décrivez votre voyage idéal, et notre agent s'occupe de tout !")
+    # Appel API (Similaire à tools.py mais pour l'UI)
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat, "longitude": lon,
+        "current": "temperature_2m,weather_code,wind_speed_10m",
+        "daily": "temperature_2m_max,temperature_2m_min",
+        "timezone": "auto"
+    }
+    
+    try:
+        response = requests.get(url, params=params).json()
+        curr = response['current']
+        daily = response['daily']
 
-    user_input = st.text_area(
-        "Votre projet de voyage :", 
-        height=150,
-        placeholder="Ex: Je veux partir à Bali du 15 au 22 mars avec 2 adultes et 1 enfant, budget moyen, on aime bouger..."
-    )
+        # Mapping Code WMO -> Emoji
+        code = curr['weather_code']
+        if code == 0: icon = "☀️"  # Soleil
+        elif code in [1, 2, 3]: icon = "⛅" # Nuageux
+        elif code in [45, 48]: icon = "🌫️" # Brouillard
+        elif 51 <= code <= 67: icon = "🌧️" # Pluie
+        elif 71 <= code <= 77: icon = "❄️" # Neige
+        elif code >= 95: icon = "⛈️" # Orage
+        else: icon = "🌡️"
 
-    # Bouton d'action
-    if st.button("Générer mon itinéraire"):
-        if user_input:
-            agent = TravelAgent()
+        st.markdown(f"### {icon} Météo en direct à {ville}")
+        
+        # 3 Colonnes visuelles
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Actuellement", f"{curr['temperature_2m']}°C", f"{curr['wind_speed_10m']} km/h Vent")
+        with col2:
+            st.metric("Max Demain", f"{daily['temperature_2m_max'][1]}°C", "Chaud")
+        with col3:
+            st.metric("Min Demain", f"{daily['temperature_2m_min'][1]}°C", "Frais")
             
-            with st.spinner("L'agent analyse et planifie votre demande (ReAct & Self-Correction en cours)..."):
-                result = agent.process_request(user_input)
+        st.divider()
+        
+    except Exception as e:
+        print(f"Erreur widget météo: {e}")
 
-            # --- CORRECTION DE LA KEYERROR et Affichage du résultat ---
+# --- APPLICATION PRINCIPALE ---
+def main():
+    st.set_page_config(page_title="IA Travel Planner", page_icon="✈️", layout="wide")
+
+    st.title("🌍 Planificateur de Voyage IA")
+    st.markdown("---")
+
+    # Zone de saisie (Sidebar ou Main)
+    with st.sidebar:
+        st.header("Votre Voyage")
+        user_input = st.text_area(
+            "Décrivez votre rêve :", 
+            height=200,
+            placeholder="Je veux aller à Bali du 15 au 30 décembre depuis Paris..."
+        )
+        generate_btn = st.button("🚀 Générer l'itinéraire", type="primary")
+
+    if generate_btn and user_input:
+        agent = TravelAgent()
+        
+        # 1. Barre de progression
+        with st.status("🤖 L'agent travaille...", expanded=True) as status:
+            st.write("🧠 Analyse de la demande...")
+            # On lance le processus
+            result = agent.process_request(user_input)
+            
             if result["success"]:
-                trip = result["data"]
-                final_plan = result["plan"]
-                initial_plan = result["initial_plan"]
+                st.write("✈️ Recherche des vols (Amadeus/Google)...")
+                st.write("⛅ Vérification de la météo...")
+                st.write("✍️ Rédaction du plan et des conseils...")
+                status.update(label="✅ Voyage planifié !", state="complete", expanded=False)
+            else:
+                status.update(label="❌ Erreur", state="error")
 
-                st.success("Analyse, Planification et Self-Correction réussies ! ")
+        # 2. Affichage des Résultats
+        if result["success"]:
+            trip = result["data"]
+            final_plan = result["plan"]
+
+            # --- A. WIDGET MÉTÉO (NOUVEAU) ---
+            afficher_widget_meteo(trip.destination)
+
+            # --- B. ONGLETS ---
+            tab_plan, tab_details = st.tabs(["📝 Itinéraire & Conseils", "🔍 Détails Techniques"])
+
+            with tab_plan:
+                st.markdown(final_plan)
                 
-                # Génération du PDF
+                # Bouton PDF
                 pdf_bytes = generate_trip_pdf(trip, final_plan)
-                filename = f"plan_voyage_{trip.destination.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-                
-                # Ajout du bouton de téléchargement
                 st.download_button(
-                    label="Télécharger le Plan en PDF ",
+                    label="📄 Télécharger le PDF",
                     data=pdf_bytes,
-                    file_name=filename,
+                    file_name=f"Voyage_{trip.destination}.pdf",
                     mime="application/pdf"
                 )
 
-                st.header("🔍 Données Analysées")
-                # Affichage des métriques (inchangé)
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Destination", trip.destination)
-                    st.metric("Dates", trip.dates)
-                    st.metric("Budget", trip.preferences.budget)
-                with col2:
-                    st.metric("Adultes", trip.voyageurs.adultes)
-                    st.metric("Enfants", trip.voyageurs.enfants)
-                    st.metric("Style", trip.preferences.style)
-                
-                st.divider()
-                
-                # AFFICHAGE DU PROCESSUS DE RAISONNEMENT (Onglets)
-                st.header("Trace du Raisonnement : ReAct & Réflexion")
-                
-                tab1, tab2 = st.tabs(["Plan Initial (ReAct)", "Plan Final (Self-Correction)"])
+            with tab_details:
+                st.json(trip.model_dump())
+                st.warning("Trace brute du raisonnement :")
+                st.text(result["initial_plan"])
 
-                with tab1:
-                    st.subheader("1. Plan Généré par l'Agent ReAct")
-                    st.warning("Ceci est la première version, générée directement après l'appel des outils.")
-                    st.markdown(initial_plan)
-                    
-                with tab2:
-                    st.subheader("2. Version Finale après Auto-Critique")
-                    st.success("Ceci est le plan optimisé et corrigé.")
-                    st.markdown(final_plan)
-
-            else:
-                # Bloc d'erreur si l'agent a échoué (plus besoin d'accéder aux clés manquantes)
-                st.error(f"Erreur : {result['message']}")
-                if 'error' in result:
-                    st.exception(result['error'])
         else:
-            st.warning("Veuillez décrire votre voyage avant de lancer la génération.")
+            st.error(f"Oups ! {result['message']}")
+            if 'error' in result:
+                st.code(result['error'])
 
 if __name__ == "__main__":
     main()

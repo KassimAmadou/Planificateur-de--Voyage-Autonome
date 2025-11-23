@@ -3,3 +3,13 @@ openai
 python-dotenv
 pydantic
 fpdf2
+requests
+geopy
+ddgs>=6.0.0
+amadeus
+pandas
+unidecode
+google-search-results
+beautifulsoup4
+selenium
+webdriver-manager

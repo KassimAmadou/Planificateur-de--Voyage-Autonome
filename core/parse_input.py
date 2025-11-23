@@ -12,30 +12,28 @@ def analyze_travel_request(user_input: str) -> VoyageRequest:
     """
     Analyse le texte utilisateur et extrait les informations structurées.
     """
-    
-    # Nous donnons un EXEMPLE du JSON attendu pour que le LLM copie la structure exacte.
     system_prompt = """
     Tu es un expert en extraction de données de voyage.
     Tu dois convertir la demande de l'utilisateur en un objet JSON STRICT correspondant exactement à ce schéma :
 
     {
-        "destination": "string (ex: Paris, Bali)",
+        "origin": "string (ex: Paris, Lyon)", 
+        "destination": "string (ex: Bali)",
         "dates": "string (ex: du 15 au 22 mars)",
         "voyageurs": {
-            "adultes": int (ex: 2),
-            "enfants": int (ex: 0)
+            "adultes": int,
+            "enfants": int
         },
         "preferences": {
-            "style": "string (ex: Détente, Aventure)",
-            "budget": "string (ex: Moyen, Élevé)"
+            "style": "string",
+            "budget": "string"
         }
     }
 
     RÈGLES IMPORTANTES :
-    1. Le champ "dates" DOIT être une simple chaîne de caractères (pas d'objet).
-    2. Tu DOIS imbriquer les nombres d'adultes et d'enfants DANS l'objet "voyageurs".
-    3. Tu DOIS imbriquer le style et le budget DANS l'objet "preferences".
-    4. Si une information manque, déduis-la de manière logique ou utilise des valeurs par défaut (1 adulte, budget moyen).
+    1. Si l'utilisateur ne précise pas la ville de départ, la valeur par défaut DOIT être "Paris".
+    2. Le champ "dates" DOIT être une simple chaîne de caractères.
+    3. Imbrique bien voyageurs et preferences.
     """
 
     try:
